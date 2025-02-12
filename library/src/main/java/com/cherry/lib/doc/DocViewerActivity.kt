@@ -16,7 +16,7 @@ open class DocViewerActivity : AppCompatActivity() {
             activity: AppCompatActivity, docSourceType: Int, path: String?,
             fileType: Int? = null, engine: Int? = null
         ) {
-            var intent = Intent(activity, DocViewerActivity::class.java)
+            val intent = Intent(activity, DocViewerActivity::class.java)
             intent.putExtra(Constant.INTENT_SOURCE_KEY, docSourceType)
             intent.putExtra(Constant.INTENT_DATA_KEY, path)
             intent.putExtra(Constant.INTENT_TYPE_KEY, fileType)
@@ -45,9 +45,16 @@ open class DocViewerActivity : AppCompatActivity() {
         docUrl = intent?.getStringExtra(Constant.INTENT_DATA_KEY)
         docSourceType = intent?.getIntExtra(Constant.INTENT_SOURCE_KEY, 0) ?: 0
         fileType = intent?.getIntExtra(Constant.INTENT_TYPE_KEY, -1) ?: -1
-        engine = intent?.getIntExtra(Constant.INTENT_ENGINE_KEY, DocEngine.INTERNAL.value) ?: DocEngine.INTERNAL.value
+        engine = intent?.getIntExtra(Constant.INTENT_ENGINE_KEY, DocEngine.INTERNAL.value)
+            ?: DocEngine.INTERNAL.value
 
-        mDocView.openDoc(this,docUrl,docSourceType,fileType,false, DocEngine.values().first { it.value == engine })
+        mDocView.openDoc(
+            this,
+            docUrl,
+            docSourceType,
+            fileType,
+            false,
+            DocEngine.values().first { it.value == engine })
         Log.e(TAG, "initData-docUrl = $docUrl")
         Log.e(TAG, "initData-docSourceType = $docSourceType")
         Log.e(TAG, "initData-fileType = $fileType")

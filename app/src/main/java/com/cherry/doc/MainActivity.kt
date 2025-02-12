@@ -2,10 +2,12 @@ package com.cherry.doc
 
 import android.Manifest
 import android.content.Intent
+import android.database.Cursor
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.provider.OpenableColumns
 import android.provider.Settings
 import android.util.Log
 import android.view.Menu
@@ -15,6 +17,7 @@ import android.view.View.OnClickListener
 import android.widget.AdapterView
 import android.widget.AdapterView.OnItemClickListener
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import com.cherry.doc.util.BasicSet
 import com.cherry.doc.util.DocUtil
 import com.cherry.doc.util.WordUtils
@@ -49,12 +52,60 @@ class MainActivity : AppCompatActivity(),OnClickListener,OnItemClickListener,
     var mDocAdapter: DocAdapter? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+    super.onCreate(savedInstanceState)
 
-        initView()
-        initData()
+    if (Intent.ACTION_VIEW == intent.action) {
+        val uri = intent.data ?: run {
+            Log.e(TAG, "No document uri to open")
+            return
+        }
+
+        var mimetype = intent.type
+
+        Log.i(TAG, "OPEN URI $uri")
+        Log.i(TAG, "  MAGIC (Intent) $mimetype")
+
+        var size: Long = -1
+        var mDocTitle: String? = null
+        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIdx >= 0 && cursor.getType(nameIdx) == Cursor.FIELD_TYPE_STRING) {
+                    mDocTitle = cursor.getString(nameIdx)
+                }
+
+                val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (sizeIdx >= 0 && cursor.getType(sizeIdx) == Cursor.FIELD_TYPE_INTEGER) {
+                    size = cursor.getLong(sizeIdx)
+                    if (size == 0L) size = -1
+                }
+            }
+        }
+
+        Log.i(TAG, "  NAME $mDocTitle")
+        Log.i(TAG, "  SIZE $size")
+
+        mimetype = mimetype.orEmpty().takeUnless { it == "application/octet-stream" }
+            ?: contentResolver.getType(uri).orEmpty()
+            .takeUnless { it == "application/octet-stream" }
+            ?: mDocTitle.orEmpty()
+
+        Log.i(TAG, "  MAGIC (Resolved) $mimetype")
+
+        lifecycleScope.launch {
+            try {
+                openDoc(uri.toString(), DocSourceType.URI)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to open document", e)
+            }
+        }
     }
+
+    setContentView(R.layout.activity_main)
+    initView()
+    initData()
+}
+
 
     private fun hasRwPermission(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
