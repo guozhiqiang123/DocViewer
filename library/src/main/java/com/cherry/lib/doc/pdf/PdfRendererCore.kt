@@ -10,10 +10,10 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
-import java.io.IOException
 import kotlin.math.min
 
 /*
@@ -34,7 +34,7 @@ internal class PdfRendererCore(
     private val pdfQuality: PdfQuality
 ) {
     companion object {
-        var  pdfRenderer: PdfRenderer? = null
+        var pdfRenderer: PdfRenderer? = null
         private const val PREFETCH_COUNT = 3
     }
 
@@ -53,7 +53,8 @@ internal class PdfRendererCore(
         cache.mkdirs()
     }
 
-    private fun getBitmapFromCache(pageNo: Int,quality: PdfQuality? = pdfQuality): Bitmap? {
+
+    private fun getBitmapFromCache(pageNo: Int, quality: PdfQuality? = pdfQuality): Bitmap? {
         val loadPath = File(File(context.cacheDir, cachePath), "$quality-$pageNo")
         if (!loadPath.exists())
             return null
@@ -64,12 +65,13 @@ internal class PdfRendererCore(
             null
         }
     }
-    fun pageExistInCache(pageNo: Int,quality: PdfQuality? = pdfQuality): Boolean {
+
+    fun pageExistInCache(pageNo: Int, quality: PdfQuality? = pdfQuality): Boolean {
         val loadPath = File(File(context.cacheDir, cachePath), "$quality-$pageNo")
         return loadPath.exists()
     }
 
-    private fun writeBitmapToCache(pageNo: Int,quality: PdfQuality? = pdfQuality, bitmap: Bitmap) {
+    private fun writeBitmapToCache(pageNo: Int, quality: PdfQuality? = pdfQuality, bitmap: Bitmap) {
         try {
             val savePath = File(File(context.cacheDir, cachePath), "$quality-$pageNo")
             savePath.createNewFile()
@@ -102,19 +104,27 @@ internal class PdfRendererCore(
         return pageCount
     }
 
-    fun renderPage(pageNo: Int,quality: PdfQuality? = pdfQuality, onBitmapReady: ((bitmap: Bitmap?, pageNo: Int) -> Unit)? = null) {
-        Log.e(javaClass.simpleName,"renderPage quality= $quality")
-        if (pageNo >= getPageCount())
-            return
-
+    fun renderPage(
+        pageNo: Int,
+        quality: PdfQuality? = pdfQuality,
+        job: Job? = null,
+        onBitmapReady: ((bitmap: Bitmap?, pageNo: Int) -> Unit)? = null
+    ) {
+        Log.e(javaClass.simpleName, "renderPage quality= $quality")
+        if (pageNo >= getPageCount()) return
         try {
-            CoroutineScope(Dispatchers.IO).launch {
+            CoroutineScope(if (job != null) Dispatchers.IO + job else Dispatchers.IO).launch {
                 synchronized(this@PdfRendererCore) {
-                    buildBitmap(pageNo,quality) { bitmap ->
-                        CoroutineScope(Dispatchers.Main).launch { onBitmapReady?.invoke(bitmap, pageNo) }
+                    buildBitmap(pageNo, quality) { bitmap ->
+                        CoroutineScope(Dispatchers.Main).launch {
+                            onBitmapReady?.invoke(
+                                bitmap,
+                                pageNo
+                            )
+                        }
                     }
                     onBitmapReady?.let {
-                        prefetchNext(pageNo + 1,quality)
+                        prefetchNext(pageNo + 1, quality)
                     }
                 }
             }
@@ -123,33 +133,38 @@ internal class PdfRendererCore(
         }
     }
 
-    private fun prefetchNext(pageNo: Int,quality: PdfQuality? = pdfQuality) {
+
+    private fun prefetchNext(pageNo: Int, quality: PdfQuality? = pdfQuality) {
         val countForPrefetch = min(getPageCount(), pageNo + PREFETCH_COUNT)
         for (pageToPrefetch in pageNo until countForPrefetch) {
-            renderPage(pageToPrefetch,quality)
+            renderPage(pageToPrefetch, quality)
         }
     }
 
-    private fun buildBitmap(pageNo: Int,quality: PdfQuality? = pdfQuality, onBitmap: (Bitmap?) -> Unit) {
-        var bitmap = getBitmapFromCache(pageNo,quality)
-        bitmap?.let {
-            onBitmap(it)
-            return@buildBitmap
+    private fun buildBitmap(
+        pageNo: Int,
+        quality: PdfQuality? = pdfQuality,
+        onBitmap: (Bitmap?) -> Unit
+    ) {
+        var bitmap = getBitmapFromCache(pageNo, quality)
+        if (bitmap != null) {
+            onBitmap(bitmap)
+            return
         }
 
         try {
             val ratio = quality?.ratio ?: 1
-            val pdfPage = pdfRenderer!!.openPage(pageNo)
+            val pdfPage = pdfRenderer?.openPage(pageNo) ?: return
             bitmap = Bitmap.createBitmap(
                 pdfPage.width * ratio,
                 pdfPage.height * ratio,
                 Bitmap.Config.ARGB_8888
-            )
-            bitmap ?: return
+            ) ?: return
             pdfPage.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
             pdfPage.close()
-            writeBitmapToCache(pageNo,quality, bitmap)
-
+            CoroutineScope(Dispatchers.IO).launch {
+                writeBitmapToCache(pageNo, quality, bitmap)
+            }
             onBitmap(bitmap)
         } catch (e: Exception) {
             e.printStackTrace()
